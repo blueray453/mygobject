@@ -2,7 +2,15 @@
   "todos": [
     {
       "text": "Learn",
-      "done": true
+      "done": false
+    },
+    {
+      "text": "Build",
+      "done": false
+    },
+    {
+      "text": "Learn",
+      "done": false
     },
     {
       "text": "Build",
