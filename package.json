@@ -1,0 +1,12 @@
+{
+  "name": "mygobject-chatgpt",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "Ahmmad Ismail <ahmmad.ismail@protonmail.com> (https://github.com/blueray453)",
+  "main": "init.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "type": "module"
+}

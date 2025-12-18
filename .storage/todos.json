@@ -1,0 +1,12 @@
+{
+  "todos": [
+    {
+      "text": "Learn",
+      "done": true
+    },
+    {
+      "text": "Build",
+      "done": false
+    }
+  ]
+}
