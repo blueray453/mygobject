@@ -1,127 +1,63 @@
-// ================================
-// Minimal Reference Implementation
-// MyGObject (v0.1 – Proof of Model)
-// ================================
-
-/*
-GOALS (what this minimal version proves):
-- Declarative properties
-- Reactive propagation (no signals for property change)
-- Computed properties with explicit dependencies
-- One-way bindings
-- Lifecycle-scoped cleanup
-
-NON-GOALS (intentionally omitted):
-- Persistence
-- DOM adapter
-- Bidirectional bindings
-- Nested reactivity
-*/
-
-// -------------------------------
-// Utility: simple dependency graph
-// -------------------------------
 class DepGraph {
     constructor() {
-        this.deps = new Map(); // prop -> Set(of computed props)
+        this.forward = new Map(); // prop -> Set(computed)
+        this.reverse = new Map(); // computed -> Set(props)
     }
 
-    addDependency(source, target) {
-        if (!this.deps.has(source)) {
-            this.deps.set(source, new Set());
-        }
-        this.deps.get(source).add(target);
+    addDependency(prop, computed) {
+        if (!this.forward.has(prop)) this.forward.set(prop, new Set());
+        if (!this.reverse.has(computed)) this.reverse.set(computed, new Set());
+        this.forward.get(prop).add(computed);
+        this.reverse.get(computed).add(prop);
     }
 
-    getDependents(prop) {
-        return this.deps.get(prop) ?? new Set();
+    dependentsOf(prop) {
+        return this.forward.get(prop) ?? new Set();
     }
 }
 
-// -------------------------------
-// Core: MyGObject
-// -------------------------------
 export class MyGObject {
-    static properties = {};
-
     constructor() {
         this._values = {};
         this._computed = {};
         this._bindings = [];
-        this._disposed = false;
         this._graph = new DepGraph();
+        this._frozen = 0;
+        this._pending = new Set();
+        this._disposed = false;
 
         this._proxy = this._createProxy();
-
-        // IMPORTANT: initialize properties AFTER proxy exists
         this._initProperties();
 
-        return this._proxy; // IMPORTANT: user interacts with proxy
+        return this._proxy;
     }
 
-    // -----------------------------
-    // Property initialization
-    // -----------------------------
-    _initProperties() {
-        const schema = this.constructor.properties;
+    // ----------------------------
+    // Proxy Layer
+    // ----------------------------
 
-        for (const [name, def] of Object.entries(schema)) {
-            if (def.compute) {
-                this._computed[name] = def;
-                this._values[name] = undefined;
-
-                // register dependencies
-                for (const dep of def.deps ?? []) {
-                    this._graph.addDependency(dep, name);
-                }
-
-                // initial compute
-                this._recompute(name);
-            } else {
-                this._values[name] = def.default;
-            }
-        }
-    }
-
-    // -----------------------------
-    // Proxy for reactive access
-    // -----------------------------
     _createProxy() {
         return new Proxy(this, {
-            get: (target, prop) => {
-                if (prop in target._values) {
-                    return target._values[prop];
-                }
-                return target[prop];
+            get: (t, p) => {
+                if (p in t._values) return t._values[p];
+                return t[p];
             },
 
-            set: (target, prop, value) => {
-                if (target._disposed) {
-                    throw new Error("Cannot mutate disposed object");
-                }
-
-                if (!(prop in target._values)) {
-                    target[prop] = value;
+            set: (t, p, v) => {
+                if (!(p in t._values)) {
+                    t[p] = v;
                     return true;
                 }
 
-                const old = target._values[prop];
-                if (old === value) return true;
+                const old = t._values[p];
+                if (old === v) return true;
 
-                target._values[prop] = value;
+                t._values[p] = v;
 
-                // propagate to computed properties
-                for (const dep of target._graph.getDependents(prop)) {
-                    target._recompute(dep);
-                }
-
-                // propagate bindings
-                for (const b of target._bindings) {
-                    if (b.source === prop) {
-                        b.targetObj[b.target] = b.transform
-                            ? b.transform(value)
-                            : value;
-                    }
+                if (t._frozen) {
+                    t._pending.add(p);
+                } else {
+                    t._propagate(p);
                 }
 
                 return true;
@@ -129,57 +65,146 @@ export class MyGObject {
         });
     }
 
-    // -----------------------------
-    // Computed recomputation
-    // -----------------------------
-    _recompute(name) {
-        const def = this._computed[name];
-        const old = this._values[name];
-        const newVal = def.compute.call(this._proxy);
+    // ----------------------------
+    // Property Initialization
+    // ----------------------------
 
-        if (old === newVal) return;
+    _initProperties() {
+        const defs = this.constructor.properties ?? {};
 
-        this._values[name] = newVal;
+        for (const [name, def] of Object.entries(defs)) {
+            if (def.compute) {
+                this._computed[name] = def;
+                this._values[name] = undefined;
+                for (const dep of def.deps) {
+                    this._graph.addDependency(dep, name);
+                }
+            } else {
+                this._values[name] = def.default;
+            }
+        }
 
-        // propagate bindings that depend on this computed property
+        for (const name of Object.keys(this._computed)) {
+            this._recompute(name);
+        }
+    }
+
+    // ----------------------------
+    // Reactive Propagation
+    // ----------------------------
+
+    _propagate(prop) {
+        for (const c of this._graph.dependentsOf(prop)) {
+            this._recompute(c);
+        }
+
         for (const b of this._bindings) {
-            if (b.source === name) {
+            if (b.source === prop) {
                 b.targetObj[b.target] = b.transform
-                    ? b.transform(newVal)
-                    : newVal;
+                    ? b.transform(this._values[prop])
+                    : this._values[prop];
             }
         }
     }
 
-    // -----------------------------
-    // Binding API (one-way)
-    // -----------------------------
-    bind(sourceProp, targetObj, targetProp, transform) {
-        this._bindings.push({
-            source: sourceProp,
-            targetObj,
-            target: targetProp,
-            transform
-        });
+    _recompute(name) {
+        const def = this._computed[name];
+        const old = this._values[name];
+        const next = def.compute.call(this._proxy);
 
-        // initial sync
-        targetObj[targetProp] = transform
-            ? transform(this[sourceProp])
-            : this[sourceProp];
+        if (old === next) return;
+
+        this._values[name] = next;
+
+        for (const b of this._bindings) {
+            if (b.source === name) {
+                b.targetObj[b.target] = b.transform
+                    ? b.transform(next)
+                    : next;
+            }
+        }
     }
 
-    // -----------------------------
+    // ----------------------------
+    // Freeze / Thaw
+    // ----------------------------
+
+    freeze() {
+        this._frozen++;
+    }
+
+    thaw() {
+        if (--this._frozen > 0) return;
+
+        const changed = [...this._pending];
+        this._pending.clear();
+
+        for (const p of changed) {
+            this._propagate(p);
+        }
+    }
+
+    // ----------------------------
+    // Bindings
+    // ----------------------------
+
+    bind(source, targetObj, target, opts = {}) {
+        const binding = {
+            source,
+            targetObj,
+            target,
+            transform: opts.transform
+        };
+
+        this._bindings.push(binding);
+
+        targetObj[target] = opts.transform
+            ? opts.transform(this._values[source])
+            : this._values[source];
+
+        return () => {
+            this._bindings = this._bindings.filter(b => b !== binding);
+        };
+    }
+
+    bindBidirectional(propA, objB, propB, opts = {}) {
+        let lock = false;
+
+        const unbindA = this.bind(propA, objB, propB, {
+            transform: v => {
+                if (lock) return v;
+                lock = true;
+                const out = opts.forward ? opts.forward(v) : v;
+                lock = false;
+                return out;
+            }
+        });
+
+        const unbindB = objB.bind(propB, this, propA, {
+            transform: v => {
+                if (lock) return v;
+                lock = true;
+                const out = opts.backward ? opts.backward(v) : v;
+                lock = false;
+                return out;
+            }
+        });
+
+        return () => {
+            unbindA();
+            unbindB();
+        };
+    }
+
+    // ----------------------------
     // Lifecycle
-    // -----------------------------
+    // ----------------------------
+
     dispose() {
         this._bindings.length = 0;
         this._disposed = true;
     }
 }
-
-// ================================
-// Example Usage
-// ================================
 
 class User extends MyGObject {
     static properties = {
@@ -195,76 +220,50 @@ class User extends MyGObject {
     };
 }
 
-// -------------------------------
-// Todo + Counter Example
-// -------------------------------
-
 class TodoModel extends MyGObject {
     static properties = {
         todos: { default: [] },
-
-        completedCount: {
-            deps: ["todos"],
-            compute() {
-                return this.todos.filter(t => t.done).length;
-            }
-        },
 
         totalCount: {
             deps: ["todos"],
             compute() {
                 return this.todos.length;
             }
+        },
+
+        completedCount: {
+            deps: ["todos"],
+            compute() {
+                return this.todos.filter(t => t.done).length;
+            }
         }
     };
 
     addTodo(text) {
-        // IMPORTANT: replace array to trigger reactivity
         this.todos = [...this.todos, { text, done: false }];
     }
 
-    toggleTodo(index) {
-        const copy = this.todos.map((t, i) =>
-            i === index ? { ...t, done: !t.done } : t
+    toggleTodo(i) {
+        this.todos = this.todos.map((t, idx) =>
+            idx === i ? { ...t, done: !t.done } : t
         );
-        this.todos = copy;
     }
 }
 
-// -------------------------------
-// Sample Input / Output
-// -------------------------------
-
-console.log("--- User example ---");
 const user = new User();
 console.log(user.fullName);
-// Ada Lovelace
-
 user.firstName = "Grace";
 console.log(user.fullName);
-// Grace Lovelace
 
 const label = { text: "" };
 user.bind("fullName", label, "text");
-console.log(label.text);
-// Grace Lovelace
-
 user.lastName = "Hopper";
 console.log(label.text);
-// Grace Hopper
 
-console.log("--- Todo example---");
 const todos = new TodoModel();
-
 console.log(todos.totalCount, todos.completedCount);
-// 0 0
-
-todos.addTodo("Learn MyGObject");
-todos.addTodo("Build Electron app");
-
+todos.addTodo("Learn");
+todos.addTodo("Build");
 console.log(todos.totalCount, todos.completedCount);
-// 2 0
-
 todos.toggleTodo(0);
 console.log(todos.totalCount, todos.completedCount);
-// 2 1
