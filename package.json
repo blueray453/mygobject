@@ -6,7 +6,10 @@
   "author": "Ahmmad Ismail <ahmmad.ismail@protonmail.com> (https://github.com/blueray453)",
   "main": "init.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "http-server -c-1 -p 8000"
   },
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
 }
