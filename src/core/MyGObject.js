@@ -2,12 +2,22 @@ import { DepGraph } from "./DepGraph.js";
 
 export class MyGObject {
     constructor() {
+        // Regular properties (will be proxied)
         this._values = {};
         this._computed = {};
         this._bindings = [];
         this._graph = new DepGraph();
         this._frozen = 0;
         this._pending = new Set();
+
+        // NON-REACTIVE properties (won't be proxied)
+        // Define them with Object.defineProperty to avoid proxy
+        const internalProps = {
+            _history: { value: [], writable: true },
+            _redoStack: { value: [], writable: true }
+        };
+
+        Object.defineProperties(this, internalProps);
 
         this._proxy = this._createProxy();
         this._initProperties();
@@ -19,12 +29,31 @@ export class MyGObject {
         return new Proxy(this, {
             get: (t, p) => (p in t._values ? t._values[p] : t[p]),
             set: (t, p, v) => {
+                if (p === '_history' || p === '_redoStack') {
+                    t[p] = v;
+                    return true;
+                }
                 console.log('[STEP 2] proxy set', p, '=>', v);
                 if (!(p in t._values)) {
                     t[p] = v;
                     return true;
                 }
-                if (t._values[p] === v) return true;
+
+                // Get the current value before changing it
+                const currentValue = t._values[p];  // THIS IS THE FIX
+
+                if (currentValue === v) return true;
+
+                // Save to history before changing
+                if (!t._frozen) {
+                    t._history.push({
+                        prop: p,
+                        oldValue: currentValue,
+                        newValue: v
+                    });
+                    t._redoStack = []; // Clear redo stack on new action
+                }
+
                 t._values[p] = v;
                 t._frozen ? t._pending.add(p) : t._propagate(p);
                 return true;
@@ -123,5 +152,60 @@ export class MyGObject {
             this._pending.clear();
             pending.forEach(p => this._propagate(p));
         }
+    }
+
+    undo() {
+        if (this._history.length === 0) return false;
+
+        const lastAction = this._history.pop();
+        this._redoStack.push(lastAction);
+
+        // Restore old value
+        this._values[lastAction.prop] = lastAction.oldValue;  // Use bracket notation
+        this._propagate(lastAction.prop);
+
+        return true;
+    }
+
+    redo() {
+        if (this._redoStack.length === 0) return false;
+
+        const nextAction = this._redoStack.pop();
+        this._history.push(nextAction);
+
+        // Apply the value again
+        this._values[nextAction.prop] = nextAction.newValue;  // Use bracket notation
+        this._propagate(nextAction.prop);
+
+        return true;
+    }
+
+    // Debug method to see current state
+    printState() {
+        console.log('Current state:', JSON.stringify(this._values, null, 2));
+    }
+
+    // Debug method to see history
+    printHistory() {
+        console.log('=== Action History ===');
+        this._history.forEach((action, index) => {
+            console.log(`${index + 1}. ${action.prop}: ${action.oldValue} → ${action.newValue}`);
+        });
+        console.log('=====================');
+    }
+
+    // Debug method to see redo stack
+    printRedoStack() {
+        console.log('=== Redo Stack ===');
+        this._redoStack.forEach((action, index) => {
+            console.log(`${index + 1}. ${action.prop}: ${action.oldValue} → ${action.newValue}`);
+        });
+        console.log('==================');
+    }
+
+    // Clear all history (for testing)
+    clearHistory() {
+        this._history = [];
+        this._redoStack = [];
     }
 }
