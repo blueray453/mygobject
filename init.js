@@ -1,22 +1,20 @@
 import { User } from "./src/models/User.js";
 import { DOMAdapter } from "./src/dom/DOMAdapter.js";
 
-const user = new User();
+document.addEventListener('DOMContentLoaded', () => {
+    const user = new User();
 
-// DOM elements
-const firstNameInput = document.getElementById('firstNameInput');
-const lastNameInput = document.getElementById('lastNameInput');
-const fullNameLabel = document.getElementById('fullName');
+    const firstNameInput = document.getElementById('firstNameInput');
+    const lastNameInput = document.getElementById('lastNameInput');
+    const fullNameLabel = document.getElementById('fullName');
 
+    console.log('[INIT] elements', {
+        firstNameInput,
+        lastNameInput,
+        fullNameLabel
+    });
 
-firstNameInput.addEventListener('input', () => {
-    console.log('[STEP 1] input event, value =', firstNameInput.value);
+    DOMAdapter.bind(user, 'firstName', firstNameInput, 'value');
+    DOMAdapter.bind(user, 'lastName', lastNameInput, 'value');
+    DOMAdapter.bind(user, 'fullName', fullNameLabel, 'textContent');
 });
-
-// Bind inputs → object
-DOMAdapter.bind(user, 'firstName', firstNameInput, 'value');
-DOMAdapter.bind(user, 'lastName', lastNameInput, 'value');
-
-// Bind computed → DOM
-DOMAdapter.bind(user, 'fullName', fullNameLabel, 'textContent');
-
