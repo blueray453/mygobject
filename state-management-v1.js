@@ -1,5 +1,5 @@
 // Import Immutable
-const { Map } = require('immutable');
+import { Map } from 'immutable';
 
 // --- Store Implementation ---
 function createStore(reducer, initialState) {
