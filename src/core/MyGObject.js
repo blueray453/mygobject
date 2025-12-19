@@ -20,6 +20,7 @@ export class MyGObject {
         return new Proxy(this, {
             get: (t, p) => (p in t._values ? t._values[p] : t[p]),
             set: (t, p, v) => {
+                console.log('[STEP 2] proxy set', p, '=>', v);
                 if (!(p in t._values)) {
                     t[p] = v;
                     return true;
@@ -58,6 +59,7 @@ export class MyGObject {
     }
 
     _recompute(name) {
+        console.log('[STEP 3] recompute', name);
         const def = this._computed[name];
         const next = def.compute.call(this._proxy);
         if (this._values[name] === next) return;
